@@ -14,6 +14,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     git curl build-essential && \
     rm -rf /var/lib/apt/lists/*
 
+# Install Node.js (for npx, claude-agent-acp, typescript)
+COPY --from=node:24-slim /usr/local/bin/node /usr/local/bin/node
+COPY --from=node:24-slim /usr/local/lib/node_modules /usr/local/lib/node_modules
+RUN ln -sf /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm && \
+    ln -sf /usr/local/lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx
+
+# Install Claude Code CLI and agent ACP
+RUN npm install -g @anthropic-ai/claude-code @agentclientprotocol/claude-agent-acp typescript
+
 # Install uv
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
