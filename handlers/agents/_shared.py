@@ -102,6 +102,8 @@ def discover_assistants() -> dict[str, dict[str, str]]:
 
 
 AGENT_OPTIONS: dict[str, dict[str, str]] = {
+    "anthropic:claude-opus-4-6": {"label": "Claude Opus 4.6 (PydanticAI)"},
+    "anthropic:claude-sonnet-4-5-20250514": {"label": "Claude Sonnet 4.5 (PydanticAI)"},
     "claude-code": {"label": "Claude Code"},
     "claude-acp:opus": {"label": "Claude (ACP) — Opus"},
     "claude-acp:sonnet": {"label": "Claude (ACP) — Sonnet"},
