@@ -2,7 +2,7 @@
 name: Fundamental Agent
 description: Tokenomics, protocol revenue, TVL, on-chain metrics, unlock schedules,
   governance analysis, and catalyst identification
-agent_key: anthropic:claude-opus-4-6
+agent_key: openai:DeepSeek-V4-Pro
 tools:
 - get_market_data
 - manage_memory

@@ -2,7 +2,7 @@
 name: Technical Agent
 description: OHLCV analysis, indicators (RSI, MACD, EMA, ATR, ADX, Bollinger), support/resistance,
   trend detection, and entry/exit zone identification
-agent_key: anthropic:claude-opus-4-6
+agent_key: openai:DeepSeek-V4-Pro
 tools:
 - get_market_data
 - manage_memory

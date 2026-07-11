@@ -2,7 +2,7 @@
 name: Synthesis Agent
 description: Portfolio manager — correlates sentiment, technical, and fundamental
   signals into risk-checked trade proposals
-agent_key: anthropic:claude-opus-4-6
+agent_key: openai:DeepSeek-V4-Pro
 tools:
 - get_market_data
 - get_portfolio_overview
