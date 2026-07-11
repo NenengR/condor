@@ -148,7 +148,20 @@ async def _run_agent_to_completion(
     # A server pinned on the Agent itself wins over the ambient chat server; when
     # the agent isn't pinned, fall back to the caller's (chat's) resolved server.
     effective_server = agent.server_name or server_name
-    if agent.server_required and effective_server:
+
+    # Skip MCP subprocesses entirely for toolless agents (server_required=false
+    # with no tools or only memory/skill tools). This avoids spawning 2+ Python
+    # child processes per consult, critical for memory-constrained deployments.
+    needs_mcp = agent.server_required or (
+        agent.tools and any(
+            t not in ("manage_memory", "manage_skill")
+            for t in (agent.tools or [])
+        )
+    )
+
+    if not needs_mcp:
+        mcp_servers = []
+    elif agent.server_required and effective_server:
         mcp_servers = build_mcp_servers_for_agent(
             effective_server,
             user_id,
