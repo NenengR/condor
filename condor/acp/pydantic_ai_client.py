@@ -395,6 +395,23 @@ class PydanticAIClient:
                 model_id, OpenAIProvider(openai_client=openai_client)
             )
 
+        # OpenAI-compatible cloud API via OPENAI_BASE_URL (e.g. api.iamhc.cn)
+        if prefix == "openai":
+            _cloud_base = os.environ.get("OPENAI_BASE_URL")
+            _cloud_key = os.environ.get("OPENAI_API_KEY")
+            if _cloud_base and _cloud_key:
+                _cloud_timeout = httpx.Timeout(
+                    connect=30.0, read=300.0, write=30.0, pool=30.0
+                )
+                openai_client = AsyncOpenAI(
+                    base_url=_cloud_base,
+                    api_key=_cloud_key,
+                    timeout=_cloud_timeout,
+                )
+                return _make_openai_compat_model(
+                    model_id, OpenAIProvider(openai_client=openai_client)
+                )
+
         # Standard pydantic-ai resolution (openai, groq, anthropic, google)
         from pydantic_ai.models import infer_model
 
