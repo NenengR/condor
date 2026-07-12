@@ -17,6 +17,14 @@ from aiohttp import ClientTimeout
 logger = logging.getLogger(__name__)
 
 
+def _server_base_url(server: dict) -> str:
+    port = int(server["port"])
+    scheme = "https" if port == 443 else "http"
+    if port in (80, 443):
+        return f"{scheme}://{server['host']}"
+    return f"{scheme}://{server['host']}:{port}"
+
+
 class UserRole(str, Enum):
     """User roles in the system"""
 
@@ -409,7 +417,7 @@ class ConfigManager:
 
         # Create new client
         server = self._data["servers"][name]
-        base_url = f"http://{server['host']}:{server['port']}"
+        base_url = _server_base_url(server)
         client = HummingbotAPIClient(
             base_url=base_url,
             username=server["username"],
@@ -472,7 +480,7 @@ class ConfigManager:
             return {"status": "error", "message": "Server not found"}
 
         server = self._data["servers"][name]
-        base_url = f"http://{server['host']}:{server['port']}"
+        base_url = _server_base_url(server)
 
         client = HummingbotAPIClient(
             base_url=base_url,

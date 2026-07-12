@@ -4,6 +4,8 @@ import logging
 from pathlib import Path
 from typing import Any
 
+from config_manager import _server_base_url
+
 log = logging.getLogger(__name__)
 
 # -- Assistant prompt loader (auto-discovery from assistants/ folder) --
@@ -359,7 +361,7 @@ def build_mcp_servers_for_session(
         )
         return [condor]
 
-    api_url = f"http://{server['host']}:{server['port']}"
+    api_url = _server_base_url(server)
 
     mcp_hummingbot = {
         "name": "mcp-hummingbot",
@@ -418,7 +420,7 @@ def build_mcp_servers_for_agent(
         )
         return [condor]
 
-    api_url = f"http://{server['host']}:{server['port']}"
+    api_url = _server_base_url(server)
 
     mcp_hummingbot = {
         "name": "mcp-hummingbot",
