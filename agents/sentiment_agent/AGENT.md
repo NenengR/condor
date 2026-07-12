@@ -2,7 +2,7 @@
 name: Sentiment Agent
 description: News aggregation, social sentiment analysis, fear & greed index, and
   event detection for crypto markets
-agent_key: openai:DeepSeek-V4-Pro
+agent_key: anthropic:claude-opus-4-6
 tools: []
 when_to_consult: When you need market sentiment analysis, news impact assessment,
   social media sentiment, fear & greed index, or event detection for any trading pair

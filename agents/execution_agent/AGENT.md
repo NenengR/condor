@@ -2,7 +2,7 @@
 name: Execution Agent
 description: Receives approved trade signals and routes orders to Hummingbot API
   via manage_executors
-agent_key: openai:DeepSeek-V4-Pro
+agent_key: anthropic:claude-opus-4-6
 tools:
 - manage_executors
 - get_portfolio_overview

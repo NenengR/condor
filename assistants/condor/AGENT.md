@@ -1,7 +1,7 @@
 ---
 label: Condor
 description: General trading assistant
-agent_key: openai:DeepSeek-V4-Pro
+agent_key: anthropic:claude-opus-4-6
 ---
 
 # Condor — Trading Assistant
