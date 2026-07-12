@@ -412,6 +412,30 @@ class PydanticAIClient:
                     model_id, OpenAIProvider(openai_client=openai_client)
                 )
 
+        # Anthropic-compatible cloud proxy (e.g. AgentRouter) via ANTHROPIC_BASE_URL.
+        # AgentRouter exposes an OpenAI-compatible /v1/chat/completions endpoint,
+        # so route through the OpenAI SDK instead of pydantic-ai's native Anthropic
+        # SDK which sends auth headers AgentRouter rejects.
+        if prefix == "anthropic":
+            _anth_base = os.environ.get("ANTHROPIC_BASE_URL")
+            _anth_key = os.environ.get("ANTHROPIC_API_KEY")
+            if _anth_base and _anth_key:
+                _anth_timeout = httpx.Timeout(
+                    connect=30.0, read=300.0, write=30.0, pool=30.0
+                )
+                # AgentRouter serves OpenAI-compatible at /v1
+                _base = _anth_base.rstrip("/")
+                if not _base.endswith("/v1"):
+                    _base += "/v1"
+                openai_client = AsyncOpenAI(
+                    base_url=_base,
+                    api_key=_anth_key,
+                    timeout=_anth_timeout,
+                )
+                return _make_openai_compat_model(
+                    model_id, OpenAIProvider(openai_client=openai_client)
+                )
+
         # Standard pydantic-ai resolution (openai, groq, anthropic, google)
         from pydantic_ai.models import infer_model
 
