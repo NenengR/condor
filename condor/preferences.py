@@ -111,7 +111,7 @@ PORTFOLIO_INTERVAL_OPTIONS = ["15m", "1h", "4h", "1d"]
 
 # CLOB trading defaults
 DEFAULT_CLOB_ACCOUNT = "master_account"
-DEFAULT_CLOB_CONNECTOR = "binance_perpetual"
+DEFAULT_CLOB_CONNECTOR = "gate_io_perpetual"
 DEFAULT_CLOB_PAIR = "BTC-USDT"
 DEFAULT_CLOB_ORDER_TYPE = "MARKET"
 DEFAULT_CLOB_SIDE = "BUY"

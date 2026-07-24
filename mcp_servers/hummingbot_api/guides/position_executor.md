@@ -10,6 +10,34 @@ Takes directional positions with defined entry, stop-loss, and take-profit level
 - You want to provide liquidity (use Market Making instead)
 - You need complex multi-leg strategies
 
+**⚠ HEDGE MODE WARNING (Gate.io, Binance, and any dual-position exchange):**
+In HEDGE mode (dual-position mode), the exchange tracks LONG and SHORT positions
+separately. When `position_executor` fires its auto-TP or auto-SL exit, it sends a
+plain SELL order **without** `position_action: 'CLOSE'`. The exchange interprets this
+as opening a new SHORT, not closing the existing LONG — so your LONG margin never
+reduces and SHORT margin accumulates.
+
+**Affected connectors:** `gate_io_perpetual`, `binance_perpetual` (when hedge mode is
+enabled), and any other connector using dual-position mode.
+
+**Fix:** Do NOT rely on `triple_barrier_config` auto-close for LONG rungs on HEDGE-mode
+connectors. Instead:
+1. Open the rung with `position_executor` (entry only, no TP/SL in triple_barrier, or
+   set `time_limit` only as a safety net).
+2. Monitor price each tick. When TP/SL condition is met, close manually:
+   ```
+   manage_executors(action="stop", executor_id="...", keep_position=true)
+   manage_executors(action="create", executor_type="order_executor",
+     executor_config={"connector_name": "{connector}",
+                      "trading_pair": "{pair}",
+                      "side": 2,
+                      "amount": {qty},
+                      "execution_strategy": "MARKET",
+                      "position_action": "CLOSE",
+                      "leverage": {leverage}})
+   ```
+   `position_action: "CLOSE"` tells the exchange to reduce the LONG, not open a SHORT.
+
 #### How It Works
 
 - Opens a directional position (long/short) with optional limit entry price

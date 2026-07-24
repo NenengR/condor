@@ -12,6 +12,7 @@ import { Bots } from "@/pages/Bots";
 import { CreateExecutor } from "@/pages/CreateExecutor";
 import { Executors } from "@/pages/Executors";
 import { Login } from "@/pages/Login";
+import { Pipeline } from "@/pages/Pipeline";
 import { Portfolio } from "@/pages/Portfolio";
 import { Routines } from "@/pages/Routines";
 import { Settings } from "@/pages/Settings";
@@ -58,6 +59,7 @@ export default function App() {
                 }
               >
                 <Route path="/" element={<Portfolio />} />
+                <Route path="/pipeline" element={<Pipeline />} />
                 <Route path="/bots" element={<Bots />} />
                 <Route path="/bots/:id" element={<BotDetail />} />
                 <Route path="/trade" element={<CreateExecutor />} />

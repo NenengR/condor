@@ -26,6 +26,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+import yaml
+
 log = logging.getLogger(__name__)
 
 _DATA_ROOT = Path(__file__).parent.parent.parent / "agents"
@@ -352,6 +354,9 @@ class JournalManager:
 
         self._tick_count = self._count_ticks()
 
+    @property
+    def journal_path(self) -> Path:
+        return self._path
     # ------------------------------------------------------------------
     # Learnings (cross-session, stored in agent_dir/learnings.md)
     # ------------------------------------------------------------------
@@ -738,6 +743,24 @@ class JournalManager:
             f"Last action: {last_action[:100]}"
         )
         self._replace_section("Summary", summary)
+
+    def update_meta(self, **fields: Any) -> None:
+        """Persist per-tick meta fields as a YAML sidecar (last_tick_health, etc.).
+
+        Multiple calls merge with the existing file. Used by TickEngine to
+        surface self-consistency health (degraded flag, consecutive empty
+        ticks) so the synthesis strategist can determine which analyst signal
+        to exclude.
+        """
+        path = self.journal_path.parent / "meta.yaml"
+        existing: dict[str, Any] = {}
+        if path.exists():
+            try:
+                existing = yaml.safe_load(path.read_text()) or {}
+            except Exception:
+                existing = {}
+        existing.update(fields)
+        path.write_text(yaml.dump(existing, default_flow_style=False))
 
     def write_state(self, state_text: str) -> None:
         """Overwrite the Summary section (backwards compat for write via MCP)."""

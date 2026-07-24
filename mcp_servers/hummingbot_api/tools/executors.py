@@ -22,6 +22,23 @@ logger = logging.getLogger("hummingbot-mcp")
 # Internal fields injected by the MCP layer, not user-supplied
 _INTERNAL_FIELDS = {"type", "executor_type", "id"}
 
+# Fields that the Hummingbot backend expects as integers (pydantic enum).
+# LLMs sometimes emit these as strings ("1" instead of 1), causing validation
+# failures on the backend.  We coerce them defensively before sending.
+_INT_ENUM_FIELDS = {"side", "open_order_type", "close_order_type"}
+
+
+def _coerce_int_fields(config: dict[str, Any]) -> None:
+    """Recursively coerce known integer-enum fields from str → int in-place."""
+    for key, value in config.items():
+        if key in _INT_ENUM_FIELDS and isinstance(value, str):
+            try:
+                config[key] = int(value)
+            except (ValueError, TypeError):
+                pass  # leave it; backend will reject with a clear error
+        elif isinstance(value, dict):
+            _coerce_int_fields(value)
+
 
 def validate_executor_config(config: dict[str, Any], schema: dict[str, Any]) -> list[str]:
     """Validate config keys against the backend schema properties.
@@ -139,6 +156,9 @@ async def manage_executors(client: Any, request: ManageExecutorsRequest) -> dict
 
         # Merge with defaults
         merged_config = executor_preferences.merge_with_defaults(executor_type, request.executor_config)
+
+        # Coerce known integer-enum fields that LLMs sometimes emit as strings
+        _coerce_int_fields(merged_config)
 
         # Ensure type is set in config
         if "type" not in merged_config and "executor_type" not in merged_config:

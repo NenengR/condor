@@ -91,6 +91,17 @@ class TickEngine:
     _last_skill_data: dict[str, Any] = field(default_factory=dict, init=False)
     _pending_directives: list[str] = field(default_factory=list, init=False)
     _cached_routines_section: str | None = field(default=None, init=False, repr=False)
+    # Self-consistency / health: consecutive ticks that produced 0 tool calls
+    # AND a very short response (the Anthropic-API failure mode where the LLM
+    # just returns its error text). Synthesis reads this to know when an
+    # analyst is degraded and should be excluded (rather than treated as zero).
+    _consecutive_empty_ticks: int = field(default=0, init=False)
+    # Last tick's tool count + response length, plus "degraded" flag.
+    _last_tick_health: dict[str, Any] = field(
+        default_factory=lambda: {"tool_count": 0, "response_chars": 0, "degraded": False},
+        init=False,
+        repr=False,
+    )
     # The live per-tick ACP client, held so stop() can reap it if the tick's own
     # finally is skipped (e.g. cancelled mid-await). None between ticks.
     _active_client: "ACPClient | PydanticAIClient | None" = field(
@@ -289,6 +300,29 @@ class TickEngine:
                         self.journal.append_error(str(e))
                     await self._notify(f"Agent {self.agent_id} tick error: {e}")
 
+                # DEGRADED-tick adaptive backoff: when the upstream model (e.g.
+                # hcnsec/MiniMax-M3) returns 0 tool calls and a ≤200-char response,
+                # back off the next tick by an exponential multiplier capped at 4x.
+                # This smooths out a flapping LLM gateway and stops tight loops
+                # from sending failed prompts at full cadence. Single-tick legitimate
+                # nudges (one tool call, "I'm waiting...") are unaffected because
+                # they don't trigger DEGRADED (_consecutive_empty_ticks resets on
+                # any meaningful output).
+                _health = self._last_tick_health
+                _backoff_mult = 1.0
+                if _health.get("degraded"):
+                    consec = _health.get("consecutive_empty", 0)
+                    _backoff_mult = min(4.0, 1.0 + 0.5 * max(0, consec - 1))
+                if _backoff_mult > 1.0:
+                    backoff_freq = int(freq * _backoff_mult)
+                    log.info(
+                        "TickEngine %s adaptive backoff x%.1f (consecutive_empty=%d) → sleep %ds",
+                        self.agent_id,
+                        _backoff_mult,
+                        _health.get("consecutive_empty", 0),
+                        backoff_freq,
+                    )
+
                 # Single-tick modes: stop after first tick
                 if mode in ("dry_run", "run_once"):
                     label = "Dry run" if mode == "dry_run" else "Run-once"
@@ -319,7 +353,10 @@ class TickEngine:
                     return
 
             try:
-                await asyncio.sleep(freq)
+                sleep_for = freq
+                if _backoff_mult > 1.0:
+                    sleep_for = int(freq * _backoff_mult)
+                await asyncio.sleep(sleep_for)
             except asyncio.CancelledError:
                 break
 
@@ -448,7 +485,7 @@ class TickEngine:
 
         await acp_client.start()
         try:
-            async with asyncio.timeout(300):
+            async with asyncio.timeout(600):
                 async for event in self._collect_stream(acp_client, prompt):
                     if isinstance(event, TextChunk):
                         response_chunks.append(event.text)
@@ -536,12 +573,38 @@ class TickEngine:
                 last_action=action_brief,
             )
 
+            # Self-consistency health tracking — see class-level docstring.
+            # Pipeline policy: if a tick produces 0 tool calls AND a short
+            # response that looks like an API error string (≤200 chars and not
+            # a normal "I'm waiting" or reasoned step), that's a degraded tick.
+            # Two degraded ticks in a row → exclude this analyst from synthesis.
+            _is_empty = len(tool_calls) == 0 and len(response_text) <= 200
+            if _is_empty:
+                self._consecutive_empty_ticks += 1
+            else:
+                self._consecutive_empty_ticks = 0
+            degraded = self._consecutive_empty_ticks >= 2
+            self._last_tick_health = {
+                "tool_count": len(tool_calls),
+                "response_chars": len(response_text),
+                "degraded": degraded,
+                "consecutive_empty": self._consecutive_empty_ticks,
+            }
+            # Persist so journal queries can surface it
+            try:
+                self.journal.update_meta(
+                    last_tick_health=self._last_tick_health,
+                )
+            except Exception:
+                pass
+
             log.info(
-                "TickEngine %s tick #%d complete (tools=%d, response=%d chars)",
+                "TickEngine %s tick #%d complete (tools=%d, response=%d chars%s)",
                 self.agent_id,
                 tick_num,
                 len(tool_calls),
                 len(response_text),
+                ", DEGRADED" if degraded else "",
             )
 
     async def _collect_stream(self, acp_client: ACPClient, prompt: str):

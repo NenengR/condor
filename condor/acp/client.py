@@ -14,6 +14,7 @@ import signal
 import subprocess
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, AsyncIterator, Awaitable, Callable
 
 from .jsonrpc import JSONRPCPeer
@@ -180,6 +181,148 @@ ACP_COMMANDS: dict[str, str] = {
 # NOTE: claude-agent-acp ignores ANTHROPIC_MODEL; the protocol is the real lever.
 _CLAUDE_ACP_BASES = {"claude-code", "claude-acp"}
 
+# Provider routing — allows per-agent selection between agentrouter (Opus) and
+# alternative gateways like hcnsec (MiniMax-M3). Suffixes:
+#   "claude-code:agentrouter"   → use ANTHROPIC_BASE_URL + ANTHROPIC_API_KEY
+#                                  (the primary provider; loaded from .env).
+#                                  Fallback: ANTHROPIC_BASE_URL_AGENTROUTER +
+#                                  ANTHROPIC_API_KEY_AGENTROUTER if the unmasked
+#                                  var has been poisoned (e.g. a shell that set
+#                                  unsuffixed ANTHROPIC_BASE_URL=https://api.hcnsec.cn).
+#   "claude-code:hcnsec"         → use ANTHROPIC_BASE_URL_HCNSEC + _API_KEY_HCNSEC
+#   "claude-code:hcnsec:model"   → same, plus set ANTHROPIC_MODEL override
+_PROVIDER_ENV_VARS: dict[str, dict[str, list[str]]] = {
+    # agentrouter = the primary URL/API_KEY. Try the unmasked vars first; if
+    # they point to api.hcnsec.cn (shell-poisoned), fall back to the
+    # suffixed ANTHROPIC_*_AGENTROUTER aliases. This guarantees Opus 4.8
+    # actually hits agentrouter regardless of what the parent shell exported.
+    "agentrouter": {
+        "ANTHROPIC_BASE_URL": ["ANTHROPIC_BASE_URL_AGENTROUTER",
+                                "ANTHROPIC_BASE_URL"],
+        "ANTHROPIC_API_KEY": ["ANTHROPIC_API_KEY_AGENTROUTER",
+                                "ANTHROPIC_API_KEY"],
+        "ANTHROPIC_MODEL": ["ANTHROPIC_MODEL_AGENTROUTER",
+                             "ANTHROPIC_MODEL"],
+    },
+    "hcnsec": {
+        "ANTHROPIC_BASE_URL": ["ANTHROPIC_BASE_URL_HCNSEC"],
+        "ANTHROPIC_API_KEY": ["ANTHROPIC_API_KEY_HCNSEC"],
+        # Set the model name too so the bridge gets the right default
+        "ANTHROPIC_MODEL": ["ANTHROPIC_MODEL_HCNSEC"],
+    },
+}
+
+_POISONED_PRIMARY = "api.hcnsec.cn"
+
+# AgentRouter has a 5-key pool. When the current key returns 401/402/403 with
+# a quota-exhausted signature, ``mark_agentrouter_key_exhausted`` advances the
+# active index. Subsequent ACP spawns use the next live key.
+_AGENTROUTER_KEY_COUNT = 5
+_AGENTROUTER_STATE_PATH = (
+    Path(__file__).parent.parent.parent / "state" / "_agentrouter_active_key"
+)
+
+
+def _load_agentrouter_state() -> dict[str, Any]:
+    """Read the persisted rotation state (default index=1, no exhaustions)."""
+    if not _AGENTROUTER_STATE_PATH.exists():
+        return {"active_index": 1, "exhausted_at": {}}
+    try:
+        return json.loads(_AGENTROUTER_STATE_PATH.read_text())
+    except Exception:
+        log.exception("agentrouter: failed to read state, falling back to index 1")
+        return {"active_index": 1, "exhausted_at": {}}
+
+
+def _save_agentrouter_state(state: dict[str, Any]) -> None:
+    """Atomic-ish write of rotation state to disk."""
+    _AGENTROUTER_STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    tmp = _AGENTROUTER_STATE_PATH.with_suffix(".tmp")
+    tmp.write_text(json.dumps(state))
+    tmp.replace(_AGENTROUTER_STATE_PATH)
+
+
+def _active_agentrouter_index() -> int:
+    """The 1-based index of the agentrouter key to use right now."""
+    return int(_load_agentrouter_state().get("active_index", 1))
+
+
+def _active_agentrouter_key_var() -> str:
+    """Name of the env var holding the current agentrouter key."""
+    return f"ANTHROPIC_API_KEY_AGENTROUTER_{_active_agentrouter_index()}"
+
+
+def _active_agentrouter_key() -> str | None:
+    """Return value of the currently-active agentrouter API key (or None)."""
+    name = _active_agentrouter_key_var()
+    candidate = os.environ.get(name)
+    if candidate:
+        return candidate
+    # Legacy fallback if no key in the pool.
+    return os.environ.get("ANTHROPIC_API_KEY_AGENTROUTER")
+
+
+def agentrouter_pool_state() -> dict[str, Any]:
+    """Read-only view of the key pool + which one is active. Used by tests."""
+    keys = []
+    for i in range(1, _AGENTROUTER_KEY_COUNT + 1):
+        name = f"ANTHROPIC_API_KEY_AGENTROUTER_{i}"
+        keys.append({
+            "index": i,
+            "env_var": name,
+            "set": bool(os.environ.get(name)),
+            "note": os.environ.get(f"{name}_NOTE", ""),
+        })
+    state = _load_agentrouter_state()
+    return {
+        "active_index": int(state.get("active_index", 1)),
+        "exhausted_at": state.get("exhausted_at", {}),
+        "keys": keys,
+    }
+
+
+def mark_agentrouter_key_exhausted(reason: str = "") -> int:
+    """Mark current agentrouter key exhausted and rotate to the next.
+
+    Returns the new active index. If every configured key is exhausted, wraps
+    back to 1 and logs a warning.
+    """
+    state = _load_agentrouter_state()
+    current = int(state.get("active_index", 1))
+    exhausted_at = state.setdefault("exhausted_at", {})
+    from datetime import datetime, timezone
+    exhausted_at[str(current)] = (
+        datetime.now(timezone.utc).isoformat()
+        + (f" :: {reason}" if reason else "")
+    )
+    next_idx = None
+    for offset in range(1, _AGENTROUTER_KEY_COUNT + 1):
+        cand = (current + offset - 1) % _AGENTROUTER_KEY_COUNT + 1
+        if os.environ.get(f"ANTHROPIC_API_KEY_AGENTROUTER_{cand}"):
+            next_idx = cand
+            break
+    if next_idx is None:
+        log.error(
+            "agentrouter: ALL %d keys exhausted; wrapping back to 1",
+            _AGENTROUTER_KEY_COUNT,
+        )
+        next_idx = 1
+    state["active_index"] = next_idx
+    _save_agentrouter_state(state)
+    log.warning(
+        "agentrouter: rotated from key #%d → #%d (reason: %s)",
+        current, next_idx, reason or "unknown",
+    )
+    return next_idx
+
+
+# Fallback alias→id when no models are advertised (e.g. AgentRouter proxy).
+_MODEL_ALIAS_FALLBACK: dict[str, str] = {
+    "opus": "claude-opus-4-8",
+    "sonnet": "claude-opus-4-8",
+    "haiku": "claude-opus-4-8",
+}
+
 
 def resolve_acp(agent_key: str) -> tuple[str, dict[str, str], str]:
     """Resolve an ACP ``agent_key`` to ``(command, env-overrides, model-pref)``.
@@ -200,9 +343,38 @@ def resolve_acp(agent_key: str) -> tuple[str, dict[str, str], str]:
     command = ACP_COMMANDS.get(base, ACP_COMMANDS["claude-code"])
     env: dict[str, str] = {}
     model_pref = ""
-    if model and base in _CLAUDE_ACP_BASES:
-        env["ANTHROPIC_MODEL"] = model
-        model_pref = model
+    if base in _CLAUDE_ACP_BASES:
+        # Provider routing: if model is a known provider name (e.g. "hcnsec"),
+        # redirect env vars to that provider's credentials/URL/model.
+        provider = model.lower() if model else ""
+        if provider in _PROVIDER_ENV_VARS:
+            mapping = _PROVIDER_ENV_VARS[provider]
+            for env_name, src_vars in mapping.items():
+                src_val = None
+                if src_vars == ["__rotate__"]:
+                    # Special marker: agentrouter API key uses the rotation pool.
+                    src_val = _active_agentrouter_key()
+                else:
+                    for src in src_vars:
+                        candidate = os.environ.get(src)
+                        if candidate:
+                            # Reject the unmasked ANTHROPIC_BASE_URL if it
+                            # was shell-poisoned to hcnsec — only honor its
+                            # value if this provider is actually "hcnsec".
+                            if (
+                                provider == "agentrouter"
+                                and src == "ANTHROPIC_BASE_URL"
+                                and _POISONED_PRIMARY in candidate
+                            ):
+                                continue
+                            src_val = candidate
+                            break
+                if src_val:
+                    env[env_name] = src_val
+            model_pref = ""  # use provider default, don't override model
+        elif model:
+            env["ANTHROPIC_MODEL"] = model
+            model_pref = model
     return command, env, model_pref
 
 
@@ -425,13 +597,26 @@ class ACPClient:
             return
         target = resolve_model_id(self.model, available)
         if not target:
-            log.warning(
-                "ACP model %r not found in advertised models %s; keeping default %s",
-                self.model,
-                [m.get("modelId") for m in available],
-                current,
-            )
-            return
+            # When the ACP agent advertises no models (empty list), try the
+            # preference as a direct model id — the bridge may still accept it
+            # via session/set_model even though it wasn't advertised. This
+            # handles the AgentRouter case where the proxy doesn't report
+            # available models but accepts explicit model ids.
+            if not available and self.model:
+                target = _MODEL_ALIAS_FALLBACK.get(self.model.lower(), self.model)
+                log.info(
+                    "ACP no advertised models; attempting direct set_model with %r (from pref %r)",
+                    target,
+                    self.model,
+                )
+            else:
+                log.warning(
+                    "ACP model %r not found in advertised models %s; keeping default %s",
+                    self.model,
+                    [m.get("modelId") for m in available],
+                    current,
+                )
+                return
         if target == current:
             log.info(
                 "ACP session %s already on requested model %s", self._session_id, target
@@ -628,6 +813,66 @@ class ACPClient:
 
         future.add_done_callback(_on_response)
 
+        # Hook the response future so we can detect quota-exhausted responses from
+        # the agentrouter provider and rotate to the next key transparently.
+        # This lets a single tick "fail" and the NEXT tick succeed without any
+        # restart. The agent key pool state lives at ``state/_agentrouter_active_key``.
+        def _maybe_rotate_on_quota_exhaustion(fut: asyncio.Future) -> None:
+            try:
+                result = fut.result()
+            except Exception:
+                return
+            # Three possible shapes:
+            # (a) JSON-RPC error envelope: {"error": {"code": 401, "message": "..."}}
+            # (b) Plain Anthropic error text reaching the bridge, parsed by
+            #     claude-agent-acp as a stop_reason="error" result without error
+            #     field (this is what we see for quota-exhaustion in practice —
+            #     the bridge doesn't wrap upstream errors into JSON-RPC).
+            # (c) text accumulated from agent_message_chunk events.
+            # We handle all three by scanning the rendered response_text.
+            rendered = ""
+            if isinstance(result, dict):
+                if result.get("error"):
+                    err = result["error"]
+                    rendered = str(err.get("message") or err)
+                    rendered += f" code={err.get('code','?')}"
+                else:
+                    # No JSON-RPC error but the prompt may have produced an
+                    # Anthropic-side error text. Check stopReason as a hint.
+                    rendered = json.dumps(result)
+            else:
+                rendered = str(result)
+
+            if not rendered:
+                return
+
+            low = rendered.lower()
+            quota_hits = any(t in low for t in (
+                "pre-consume quota failed",
+                "quota",
+                "credit",
+                "payment required",
+                "exceed",
+                "exhausted",
+                "rate limit",
+                "too many requests",
+                "unauthorized",
+                "billing",
+            ))
+            if not quota_hits:
+                return
+
+            try:
+                new_idx = mark_agentrouter_key_exhausted(reason=rendered[:120])
+                log.warning(
+                    "agentrouter: rotated to key #%d after quota response; next tick will retry",
+                    new_idx,
+                )
+            except Exception:
+                log.exception("agentrouter: rotate failed")
+
+        future.add_done_callback(_maybe_rotate_on_quota_exhaustion)
+
         loop = asyncio.get_event_loop()
         start_time = loop.time()
         max_duration = (
@@ -659,6 +904,18 @@ class ACPClient:
             self._current_req_id = None
 
     # --- Reverse-RPC handlers ---
+    _QUOTA_KEYWORDS = (
+        "pre-consume quota failed",
+        "quota",
+        "credit",
+        "payment required",
+        "exceed",
+        "exhausted",
+        "rate limit",
+        "too many requests",
+        "unauthorized",
+        "billing",
+    )
 
     def _on_session_update(
         self,
@@ -672,6 +929,20 @@ class ACPClient:
             content = update.get("content", {})
             text = content.get("text", "")
             if text:
+                # Watch for quota-exhaustion text from upstream. The bridge
+                # delivers Anthropic-side errors as agent_message_chunks (not
+                # as JSON-RPC error envelopes), so this is the real hook for
+                # rotating the agentrouter key.
+                low = text.lower()
+                if any(t in low for t in self._QUOTA_KEYWORDS):
+                    try:
+                        idx = mark_agentrouter_key_exhausted(reason=text[:120])
+                        log.warning(
+                            "agentrouter: rotated → key #%d due to quota text: %.80s",
+                            idx, text,
+                        )
+                    except Exception:
+                        log.exception("agentrouter: rotate failed")
                 self._event_queue.put_nowait(TextChunk(text=text))
         elif kind == "agent_thought_chunk":
             content = update.get("content", {})

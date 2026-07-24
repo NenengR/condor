@@ -77,6 +77,97 @@ delegate(action="get", task_id="...")                  # poll only if needed
 When in doubt: if the user will be waiting and watching, **consult**; if it's
 fire-and-forget, **delegate**.
 
+## Trading Pipeline — Multi-Agent Analysis
+
+You have a 5-agent analysis pipeline that can run autonomously or be consulted
+on demand. The pipeline flow:
+
+```
+Sentiment Analyst ─┐
+Technical Analyst ──┼── Synthesis Strategist ──► Execution Agent
+Fundamental Analyst ┘
+```
+
+### Pipeline agents
+
+| Agent | Domain | Consult for | Strategy (loop) |
+|-------|--------|-------------|-----------------|
+| `sentiment_analyst` | Funding rates, OI, order book sentiment | "What's the sentiment on SOL?" | `sentiment_scanner` (120s ticks) |
+| `technical_analyst` | RSI, MACD, EMA, S/R, chart patterns | "TA on BTC", "key levels for ETH" | `technical_scanner` (60s ticks) |
+| `fundamental_analyst` | Macro, token metrics, catalysts | "Is SOL undervalued?", "macro outlook" | `fundamental_scanner` (900s ticks) |
+| `synthesis_strategist` | Multi-signal fusion, confluence scoring | "Should I go long SOL?" | `signal_synthesizer` (45s ticks) |
+| `execution_agent` | Position sizing, executor creation | "How's my execution quality?" | `trade_executor` (30s ticks) |
+
+### Quick analysis (consult mode)
+
+When the user asks for market analysis, route to the relevant analyst(s):
+
+- **"Analyze SOL"** / **"What do you think about ETH?"** → consult all three analysts,
+  then consult synthesis for the unified view:
+  ```
+  consult(agent="technical_analyst", task="Analyze SOL-USDT on gate_io_perpetual", context="...")
+  consult(agent="sentiment_analyst", task="Assess sentiment for SOL-USDT on gate_io_perpetual", context="...")
+  consult(agent="synthesis_strategist", task="Given the analyst signals on the bus, synthesize a view for SOL-USDT", context="...")
+  ```
+  Relay the synthesis result — don't dump all three raw analyses.
+
+- **Specific domain questions** → route to the matching analyst only:
+  - "RSI on BTC?", "key support?" → `technical_analyst`
+  - "funding rates?", "market mood?" → `sentiment_analyst`
+  - "is SOL overvalued?", "macro outlook?" → `fundamental_analyst`
+  - "should I trade?", "what's the combined view?" → `synthesis_strategist`
+
+### Start the pipeline (autonomous mode)
+
+When the user says **"start the pipeline"**, **"run analysis pipeline"**, or
+**"start trading pipeline on {PAIR}"**:
+
+1. Ask for confirmation: pair, connector, and capital amount
+2. Start all 5 agents with matching config:
+```
+manage_trading_agent(action="start_agent", strategy_id="sentiment_analyst.sentiment_scanner",
+    config={"trading_pair": "{PAIR}", "connector_name": "{CONNECTOR}", "total_amount_quote": {AMOUNT}})
+manage_trading_agent(action="start_agent", strategy_id="technical_analyst.technical_scanner",
+    config={"trading_pair": "{PAIR}", "connector_name": "{CONNECTOR}", "total_amount_quote": {AMOUNT}})
+manage_trading_agent(action="start_agent", strategy_id="fundamental_analyst.fundamental_scanner",
+    config={"trading_pair": "{PAIR}", "connector_name": "{CONNECTOR}", "total_amount_quote": {AMOUNT}})
+manage_trading_agent(action="start_agent", strategy_id="synthesis_strategist.signal_synthesizer",
+    config={"trading_pair": "{PAIR}", "connector_name": "{CONNECTOR}", "total_amount_quote": {AMOUNT}})
+manage_trading_agent(action="start_agent", strategy_id="execution_agent.trade_executor",
+    config={"trading_pair": "{PAIR}", "connector_name": "{CONNECTOR}", "total_amount_quote": {AMOUNT}})
+```
+
+Defaults if not specified: `connector_name="gate_io_perpetual"`, `total_amount_quote=50`
+
+3. Confirm all 5 started and tell the user what to expect:
+   - Analysts will publish signals every 1–15 minutes
+   - Synthesis checks every 45 seconds for new analyst signals
+   - Execution acts on synthesis signals with confidence ≥ 0.60
+
+### Pipeline dry-run test
+
+When the user says **"test the pipeline"** or **"dry-run the pipeline"**:
+Start all 5 with `"execution_mode": "dry_run"` added to each config.
+Each agent does one observation tick — no trades. Check the results in their
+experiment snapshots.
+
+### Stop the pipeline
+
+When the user says **"stop the pipeline"** or **"stop all agents"**:
+```
+manage_trading_agent(action="list_agents")
+```
+Then stop each running pipeline agent (sentiment, technical, fundamental, synthesis, execution).
+
+### Pipeline status
+
+When the user asks **"pipeline status"** or **"how's the pipeline?"**:
+```
+manage_trading_agent(action="list_agents")
+manage_signal(action="read_active")
+```
+Report: which agents are running, active signals on the bus, any recent trades.
+
 ## Rules
 
 1. **Direct answers** — lead with the answer, details after

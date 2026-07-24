@@ -16,6 +16,7 @@ from mcp_servers.condor.tools import (
     notification,
     routines,
     servers,
+    signals as signals_tool,
     skills,
     trading_agent,
 )
@@ -525,6 +526,72 @@ async def manage_notes(
         Action-specific result dict.
     """
     return await notes.manage_notes(action, key, value)
+
+
+# ---------------------------------------------------------------------------
+# Signal bus -- inter-agent signal pub/sub
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+@handle_errors("manage signal")
+async def manage_signal(
+    action: str,
+    signal_type: str = "",
+    direction: str = "",
+    pair: str = "",
+    connector: str = "",
+    confidence: float = 0.5,
+    entry_price: float | None = None,
+    take_profit: float | None = None,
+    stop_loss: float | None = None,
+    metadata: dict | None = None,
+    expires_sec: int = 300,
+    signal_id: str = "",
+    agent_id: str = "",
+    min_confidence: float = 0.0,
+    limit: int = 20,
+) -> dict:
+    """Manage inter-agent trading signals on the shared signal bus.
+
+    Agents publish signals (regime changes, directional trades, risk alerts) that
+    other agents can read and act on. This is the backbone of multi-agent coordination.
+
+    Actions:
+    - "publish": Publish a new signal (requires signal_type, direction, pair).
+      Source is auto-set to the calling agent. Returns signal_id.
+    - "read_active": List active (unexpired) signals. Optional filters: pair,
+      signal_type, min_confidence.
+    - "read_recent": Recent signal history from the bus log (optional limit).
+    - "acknowledge": Mark a signal as acted upon (requires signal_id). Prevents
+      other agents (or future ticks) from re-executing the same signal.
+
+    Args:
+        action: publish | read_active | read_recent | acknowledge
+        signal_type: directional | regime_change | risk_alert | opportunity
+        direction: long | short | neutral | reduce
+        pair: Trading pair (e.g. "SOL-USDT").
+        connector: Exchange connector (e.g. "binance_perpetual").
+        confidence: Signal confidence 0.0-1.0 (default 0.5).
+        entry_price: Suggested entry price (optional).
+        take_profit: Suggested TP level (optional).
+        stop_loss: Suggested SL level (optional).
+        metadata: Arbitrary key-value data (indicators, reasoning, etc.).
+        expires_sec: Signal TTL in seconds (default 300 = 5 min).
+        signal_id: Signal ID (for acknowledge).
+        agent_id: Agent ID to record as acknowledger (default: calling agent).
+        min_confidence: Minimum confidence filter for read_active (default 0.0).
+        limit: Max entries for read_recent (default 20).
+
+    Returns:
+        Action-specific result dict.
+    """
+    return await signals_tool.manage_signal(
+        action, signal_type, direction, pair, connector,
+        confidence, entry_price, take_profit, stop_loss,
+        metadata, expires_sec, signal_id, agent_id,
+        min_confidence, limit,
+    )
 
 
 # ---------------------------------------------------------------------------

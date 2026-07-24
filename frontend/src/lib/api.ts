@@ -676,6 +676,58 @@ export interface BacktestTask {
   saved?: boolean;
 }
 
+// ── Pipeline types ──
+
+export interface PipelineSignal {
+  signal_id: string;
+  source: string;
+  signal_type: string;
+  direction: string;
+  pair: string;
+  connector: string;
+  confidence: number;
+  entry_price: number | null;
+  take_profit: number | null;
+  stop_loss: number | null;
+  created_at: string;
+  expires_at: string;
+  metadata: Record<string, unknown>;
+  acknowledged_by: string[];
+}
+
+export interface AgentHealthTick {
+  tool_count: number;
+  response_chars: number;
+  degraded: boolean;
+  consecutive_empty: number;
+}
+
+export interface AgentHealth {
+  agent_id: string;
+  strategy: string | null;
+  status: "healthy" | "degraded" | "stale" | "stopped" | "unknown";
+  last_tick: AgentHealthTick | null;
+  session_num: number | null;
+  last_tick_at: string | null;
+}
+
+export interface PipelineAlert {
+  level: "warning" | "error";
+  agent_id: string;
+  message: string;
+  timestamp: string;
+}
+
+export interface PipelineSignalsResponse {
+  recent: PipelineSignal[];
+  active: PipelineSignal[];
+}
+
+export interface PipelineHealthResponse {
+  agents: AgentHealth[];
+  alerts: PipelineAlert[];
+}
+
 // ── API functions ──
 
 export const api = {
@@ -1371,4 +1423,12 @@ export const api = {
 
   getChatOptions: () =>
     apiFetch<ChatOptionsResponse>("/api/v1/chat/options"),
+
+  // ── Pipeline ──
+
+  getPipelineSignals: (limit = 50) =>
+    apiFetch<PipelineSignalsResponse>(`/api/v1/pipeline/signals?limit=${limit}`),
+
+  getPipelineHealth: () =>
+    apiFetch<PipelineHealthResponse>("/api/v1/pipeline/health"),
 };

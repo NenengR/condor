@@ -115,6 +115,7 @@ def _build_tool_preload(*, is_dry_run: bool, is_experiment: bool) -> str:
         "mcp__condor__manage_memory",
         "mcp__condor__manage_skill",
         "mcp__condor__manage_routines",
+        "mcp__condor__manage_signal",
     ]
     return (
         "IMPORTANT: At the very start, load ALL MCP tools in a single ToolSearch call:\n"

@@ -36,24 +36,25 @@ These defaults will be applied when creating new executors.
 
 ```yaml
 position_executor:
-  # Add your default position executor config here
-  # Example:
-  # connector_name: binance_perpetual
-  # trading_pair: BTC-USDT
-  # side: BUY
-  # leverage: 10
+  connector_name: gate_io_perpetual   # or binance_perpetual, bybit_perpetual, etc.
+  # side: 1 = BUY/LONG, 2 = SELL/SHORT (INT enum, not a string)
+  # amount is in BASE currency (usd / entry_price)
+  # Leverage policy: min 10x, target 20x, up to 50x when the pair supports it
+  leverage: 20
+  triple_barrier_config:
+    open_order_type: 2   # 2 = LIMIT, 3 = LIMIT_MAKER
 ```
 
 ### DCA Executor Defaults
 
 ```yaml
 dca_executor:
-  # Add your default DCA executor config here
-  # Example:
-  # connector_name: binance
-  # trading_pair: BTC-USDT
-  # amounts_quote: [100, 100, 100]
-  # prices: [50000, 48000, 46000]
+  connector_name: gate_io_perpetual   # or binance_perpetual, bybit_perpetual, etc.
+  # side: 1 = BUY/LONG, 2 = SELL/SHORT (INT enum, not a string)
+  # amounts_quote + prices are PARALLEL lists (quote currency); NOT total_amount_quote/n_levels
+  # Leverage policy: min 10x, target 20x (drop to 10x only if the pair's max is below 20x)
+  leverage: 20
+  mode: MAKER
 ```
 
 ### Grid Executor Defaults

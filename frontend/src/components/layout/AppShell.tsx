@@ -5,6 +5,7 @@ import {
   Brain,
   Eye,
   Moon,
+  Radio,
   Settings,
   Sun,
   Swords,
@@ -26,6 +27,7 @@ import { ServerSelector } from "./ServerSelector";
 
 const NAV_ITEMS = [
   { to: "/", icon: Wallet, label: "Portfolio" },
+  { to: "/pipeline", icon: Radio, label: "Pipeline" },
   { to: "/trade", icon: Swords, label: "Trade" },
   { to: "/bots", icon: Bot, label: "Bots" },
   { to: "/executors", icon: Activity, label: "Executors" },

@@ -17,6 +17,7 @@ def _auto_register() -> None:
     """Import built-in provider modules."""
     from . import executors  # noqa: F401
     from . import positions  # noqa: F401
+    from . import signals  # noqa: F401
 
 
 def register_provider(provider: BaseProvider) -> None:
