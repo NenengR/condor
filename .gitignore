@@ -68,6 +68,18 @@ instance/
 # Scrapy stuff:
 .scrapy
 
+# ── Runtime / trading data (regenerated locally) ──
+.env
+.env.*
+!.env.example
+state/
+reports/
+agents/_signals/
+agents/*/strategies/*/sessions/
+agents/*/strategies/*/dry_runs/
+agents/*/strategies/*/learnings.md
+agents/*/strategies/_archive*/
+
 # Sphinx documentation
 docs/_build/
 
