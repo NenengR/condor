@@ -231,8 +231,11 @@ export function Pipeline() {
       (s.source === "market_screener" && s.pair === "WATCHLIST"),
   );
 
-  const directionalSignals = recentSignals.filter(
-    (s) => s.signal_type !== "opportunity" || s.pair !== "WATCHLIST",
+  // Recent Signals = every signal that hits the bus, newest first.
+  // The grouped WATCHLIST pseudo-signal is excluded here (Watchlist panel
+  // shows it) but per-pair opportunity rows emitted by the screener are kept.
+  const recentSignalsAll = recentSignals.filter(
+    (s) => !(s.signal_type === "opportunity" && s.pair === "WATCHLIST"),
   );
 
   const healthyCount = agents.filter((a) => a.status === "healthy").length;
@@ -299,13 +302,13 @@ export function Pipeline() {
                 <div className="py-8 text-center text-sm text-[var(--color-text-muted)]">
                   Loading...
                 </div>
-              ) : directionalSignals.length === 0 ? (
+              ) : recentSignalsAll.length === 0 ? (
                 <div className="py-8 text-center text-sm text-[var(--color-text-muted)]">
                   No recent signals
                 </div>
               ) : (
                 <div className="max-h-[400px] overflow-y-auto">
-                  {directionalSignals.slice(0, 30).map((s) => (
+                  {recentSignalsAll.slice(0, 30).map((s) => (
                     <SignalRow key={s.signal_id} signal={s} />
                   ))}
                 </div>

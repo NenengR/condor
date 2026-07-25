@@ -122,7 +122,35 @@ Dead/untradable pairs (volatility_component near 0) are dropped regardless of sc
 - Mark any pair with |funding| > 0.10% into an `avoid` list (squeeze risk) — it can
   still be on the watchlist as a warning, but flag it.
 
-### Step 6: Publish the watchlist (one opportunity signal)
+### Step 6: Publish the watchlist (one grouped + N per-pair opportunity signals)
+
+**First publish the per-pair rows** so the dashboard's Recent Signals panel can
+show each shortlist pair on its own (these carry the most analyst-actionable
+detail — composite score, funding, volatility per pair):
+```
+manage_signal(action="publish",
+  signal_type="opportunity",
+  direction="neutral",
+  pair="{pair}",                 # e.g. "DOGE-USDT"
+  connector="{connector_name}",
+  confidence={composite for this pair},
+  metadata={
+    "source": "market_screener",
+    "group": "watchlist",
+    "rank": {1-based rank on the shortlist},
+    "composite": {round(composite, 4)},
+    "funding_pct": {%},
+    "momentum_4h": {%},
+    "avg_range_pct": {%},
+    "avoid": {true|false},
+    "notes": "funding {x}%, {y}% 4h, vol {z}%"
+  },
+  expires_sec=900)
+```
+Loop this for each of the top `watchlist_size` pairs.
+
+**Then publish one grouped signal** so the Watchlist panel keeps its compact
+view of the whole shortlist in a single card:
 ```
 manage_signal(action="publish",
   signal_type="opportunity",
@@ -139,6 +167,17 @@ manage_signal(action="publish",
   },
   expires_sec=900)
 ```
+
+### Step 7: Confluence guard (only emit directional downstream if both analysts agree)
+
+If you independently observe a *confluence* on any pair (e.g. your top-ranked
+pair is also classified as `regime_change: trending` by the technical analyst's
+active signal), raise the per-pair confidence you publish above to
+`min(1.0, composite + 0.10)` and add `confluence: true` to its metadata. Pairs
+without confluence stay at their base composite — analyst agents must themselves
+publish a separate `regime_change` signal before the execution agent will act.
+This keeps the watchlist on pairs the rest of the pipeline has actually
+validated.
 
 ### Step 7: Risk alerts for dangerous funding
 For each pair with |funding| > 0.10%, also publish:
