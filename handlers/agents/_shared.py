@@ -6,6 +6,10 @@ from typing import Any
 
 log = logging.getLogger(__name__)
 
+# Condor project root (contains pyproject.toml) — used to anchor `uv run`
+# with --directory so MCP subprocesses work regardless of the spawner's cwd.
+_PROJECT_ROOT = str(Path(__file__).resolve().parent.parent.parent)
+
 # -- Assistant prompt loader (auto-discovery from assistants/ folder) --
 
 _ASSISTANTS_DIR = Path(__file__).parent.parent.parent / "assistants"
@@ -332,7 +336,7 @@ def build_mcp_servers_for_session(
     condor = {
         "name": "condor",
         "command": "uv",
-        "args": ["run", "python", "-m", "mcp_servers.condor"]
+        "args": ["run", "--directory", _PROJECT_ROOT, "python", "-m", "mcp_servers.condor"]
         + _condor_mcp_args(chat_id, user_id, server_name=server_name),
         "env": [],
     }
@@ -363,6 +367,8 @@ def build_mcp_servers_for_session(
         "command": "uv",
         "args": [
             "run",
+            "--directory",
+            _PROJECT_ROOT,
             "python",
             "-m",
             "mcp_servers.hummingbot_api",
@@ -401,7 +407,7 @@ def build_mcp_servers_for_agent(
     condor = {
         "name": "condor",
         "command": "uv",
-        "args": ["run", "python", "-m", "mcp_servers.condor"]
+        "args": ["run", "--directory", _PROJECT_ROOT, "python", "-m", "mcp_servers.condor"]
         + _condor_mcp_args(chat_id, user_id, agent_slug, server_name=server_name),
         "env": [],
     }
@@ -422,6 +428,8 @@ def build_mcp_servers_for_agent(
         "command": "uv",
         "args": [
             "run",
+            "--directory",
+            _PROJECT_ROOT,
             "python",
             "-m",
             "mcp_servers.hummingbot_api",
