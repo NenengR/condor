@@ -371,7 +371,12 @@ def resolve_acp(agent_key: str) -> tuple[str, dict[str, str], str]:
                             break
                 if src_val:
                     env[env_name] = src_val
-            model_pref = ""  # use provider default, don't override model
+            # If the provider resolved a model name, pass it as model_pref
+            # so ACPClient sends session/set_model over the protocol.  The
+            # claude-agent-acp bridge ignores the ANTHROPIC_MODEL env var and
+            # defaults to claude-opus-4-6 — without an explicit set_model the
+            # hcnsec gateway (which only serves MiniMax-M3) returns 403.
+            model_pref = env.get("ANTHROPIC_MODEL", "")
         elif model:
             env["ANTHROPIC_MODEL"] = model
             model_pref = model
