@@ -677,7 +677,7 @@ class TickEngine:
             )
         else:
             # Supports a Claude model suffix, e.g. "claude-acp:opus" — selected via
-            # session/set_model after handshake (the bridge ignores ANTHROPIC_MODEL).
+            # session/set_config_option after handshake.
             agent_cmd, model_env, model_pref = resolve_acp(agent_key)
             return ACPClient(
                 command=agent_cmd,

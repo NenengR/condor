@@ -531,7 +531,7 @@ def test_resolve_acp_model_suffix():
     from condor.acp.client import resolve_acp
 
     # Returns (command, env, model_pref). The suffix is surfaced as model_pref so
-    # ACPClient can select it via session/set_model (the bridge ignores env).
+    # ACPClient can select it via session/set_config_option.
     cmd, env, pref = resolve_acp("claude-acp:opus")
     assert cmd == "claude-agent-acp"
     assert env == {"ANTHROPIC_MODEL": "opus"}

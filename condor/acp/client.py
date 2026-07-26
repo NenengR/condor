@@ -175,10 +175,10 @@ ACP_COMMANDS: dict[str, str] = {
 }
 
 # ACP bases whose model can be picked via a suffix (e.g. "claude-acp:opus").
-# The suffix is selected at runtime via session/set_model against the agent's
-# advertised models (see ACPClient._select_model), which resolves aliases
-# ("opus", "sonnet", "haiku") and full ids alike — so no hardcoded ids age here.
-# NOTE: claude-agent-acp ignores ANTHROPIC_MODEL; the protocol is the real lever.
+# The suffix is selected at runtime via session/set_config_option against the
+# agent's advertised models (see ACPClient._select_model), which resolves
+# aliases ("opus", "sonnet", "haiku") and full ids alike — so no hardcoded ids
+# age here.
 _CLAUDE_ACP_BASES = {"claude-code", "claude-acp"}
 
 # Provider routing — allows per-agent selection between agentrouter (Opus) and
@@ -207,8 +207,11 @@ _PROVIDER_ENV_VARS: dict[str, dict[str, list[str]]] = {
     "hcnsec": {
         "ANTHROPIC_BASE_URL": ["ANTHROPIC_BASE_URL_HCNSEC"],
         "ANTHROPIC_API_KEY": ["ANTHROPIC_API_KEY_HCNSEC"],
-        # Set the model name too so the bridge gets the right default
-        "ANTHROPIC_MODEL": ["ANTHROPIC_MODEL_HCNSEC"],
+        # Do NOT pass ANTHROPIC_MODEL here.  The Claude SDK reads it from the
+        # environment and rejects non-Claude model names ("There's an issue
+        # with the selected model (MiniMax-M3)").  The hcnsec gateway must
+        # accept whatever Claude model the bridge defaults to and internally
+        # route requests to MiniMax-M3.
     },
 }
 
@@ -333,11 +336,11 @@ def resolve_acp(agent_key: str) -> tuple[str, dict[str, str], str]:
     suffix.
 
     The suffix is returned as ``model-pref`` so the caller can select it over the
-    ACP protocol (``session/set_model``) — the ``claude-agent-acp`` bridge does NOT
-    read ``ANTHROPIC_MODEL`` (it picks from Claude Code ``settings.model`` or the
-    first advertised model), so env is not a reliable channel. We still set
-    ``ANTHROPIC_MODEL`` for any non-bridge consumer, but ACPClient drives the model
-    via the protocol.
+    ACP protocol (``session/set_config_option`` with configId ``"model"``) — the
+    ``claude-agent-acp`` bridge reads ``ANTHROPIC_MODEL`` from the env but rejects
+    non-Claude model names, so env is not a reliable channel for proxied
+    providers. We still set ``ANTHROPIC_MODEL`` in env for non-hcnsec providers
+    where the value is a valid Claude model name.
     """
     base, _, model = agent_key.partition(":")
     command = ACP_COMMANDS.get(base, ACP_COMMANDS["claude-code"])
@@ -372,11 +375,16 @@ def resolve_acp(agent_key: str) -> tuple[str, dict[str, str], str]:
                 if src_val:
                     env[env_name] = src_val
             # If the provider resolved a model name, pass it as model_pref
-            # so ACPClient sends session/set_model over the protocol.  The
-            # claude-agent-acp bridge ignores the ANTHROPIC_MODEL env var and
-            # defaults to claude-opus-4-6 — without an explicit set_model the
-            # hcnsec gateway (which only serves MiniMax-M3) returns 403.
+            # so ACPClient sends session/set_config_option over the protocol.
+            # NOTE: hcnsec no longer sets ANTHROPIC_MODEL (the bridge rejects
+            # non-Claude names), so model_pref stays "" for that provider —
+            # the gateway must accept the bridge's default model and route it.
             model_pref = env.get("ANTHROPIC_MODEL", "")
+            # Ensure ANTHROPIC_MODEL from the parent env doesn't leak through
+            # to the bridge when this provider doesn't set one. An empty string
+            # makes the bridge's `if (process.env.ANTHROPIC_MODEL)` falsy.
+            if "ANTHROPIC_MODEL" not in env:
+                env["ANTHROPIC_MODEL"] = ""
         elif model:
             env["ANTHROPIC_MODEL"] = model
             model_pref = model
@@ -387,8 +395,8 @@ def resolve_model_id(preference: str, available_models: list[dict]) -> str | Non
     """Map a model ``preference`` (e.g. "sonnet", "claude-sonnet-4-6") to an exact
     advertised ``modelId`` from the ACP agent's ``availableModels``.
 
-    The ``session/set_model`` request needs an EXACT id — the bridge does not
-    fuzzy-match there (unlike its own settings.model handling). We mirror its
+    The ``session/set_config_option`` request needs an EXACT id — the bridge does
+    not fuzzy-match there (unlike its own settings.model handling). We mirror its
     matching: exact id/name, then substring, so a short alias like "sonnet" still
     resolves. Returns ``None`` if nothing matches (caller keeps the default).
     """
@@ -581,9 +589,11 @@ class ACPClient:
         log.info("ACP session started: %s (cmd=%s)", self._session_id, self.command)
 
         # Select the requested model over the ACP protocol. The claude-agent-acp
-        # bridge does NOT honor ANTHROPIC_MODEL — it defaults to Claude Code's
-        # settings.model or the first advertised model — so the only reliable way
-        # to pin (e.g.) Sonnet is session/set_model with an exact advertised id.
+        # bridge exposes model switching via session/set_config_option (configId
+        # "model") — NOT session/set_model (which does not exist in ACP v1 and
+        # returns -32601). The bridge also reads ANTHROPIC_MODEL from the env,
+        # but rejects non-Claude model names, so env is not a reliable channel
+        # for proxied providers like hcnsec.
         await self._select_model(result.get("models") or {})
 
     async def _select_model(self, model_state: dict) -> None:
@@ -604,8 +614,8 @@ class ACPClient:
         if not target:
             # When the ACP agent advertises no models (empty list), try the
             # preference as a direct model id — the bridge may still accept it
-            # via session/set_model even though it wasn't advertised. This
-            # handles the AgentRouter case where the proxy doesn't report
+            # via session/set_config_option even though it wasn't advertised.
+            # This handles the AgentRouter case where the proxy doesn't report
             # available models but accepts explicit model ids.
             if not available and self.model:
                 target = _MODEL_ALIAS_FALLBACK.get(self.model.lower(), self.model)
@@ -629,8 +639,12 @@ class ACPClient:
             return
         try:
             await self._peer.send_request(
-                "session/set_model",
-                {"sessionId": self._session_id, "modelId": target},
+                "session/set_config_option",
+                {
+                    "sessionId": self._session_id,
+                    "configId": "model",
+                    "value": target,
+                },
                 self._process.stdin,
             )
             self.active_model_id = target
@@ -642,7 +656,7 @@ class ACPClient:
             )
         except Exception:
             log.exception(
-                "ACP session/set_model failed for %r; staying on %s",
+                "ACP session/set_config_option(model) failed for %r; staying on %s",
                 self.model,
                 current,
             )

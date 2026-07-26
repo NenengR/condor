@@ -182,8 +182,8 @@ async def get_or_create_session(
     else:
         # For ACP subprocess models: claude-code, gemini, codex.
         # A Claude model can be pinned via a suffix, e.g. "claude-acp:opus" /
-        # "claude-acp:sonnet"; ACPClient selects it via session/set_model after
-        # handshake (the bridge ignores ANTHROPIC_MODEL). Bare key = agent default.
+        # "claude-acp:sonnet"; ACPClient selects it via session/set_config_option
+        # after handshake. Bare key = agent default.
         command, model_env, model_pref = resolve_acp(agent_key)
         client = ACPClient(
             command=command,
